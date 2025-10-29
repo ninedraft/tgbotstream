@@ -6,6 +6,7 @@ require (
 	github.com/OvyFlash/telegram-bot-api v0.0.0-20251014214618-257761277c51
 	github.com/charmbracelet/log v0.4.0
 	github.com/coder/websocket v1.8.14
+	github.com/cristalhq/istty v0.1.0
 	github.com/stretchr/testify v1.9.0
 )
 

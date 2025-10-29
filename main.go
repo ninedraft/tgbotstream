@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -20,7 +21,9 @@ import (
 	"github.com/ninedraft/tgbotstream/secret"
 
 	telegram "github.com/OvyFlash/telegram-bot-api"
+	"github.com/charmbracelet/log"
 	colorlog "github.com/charmbracelet/log"
+	istty "github.com/cristalhq/istty"
 )
 
 func run() (int, error) {
@@ -43,18 +46,20 @@ func run() (int, error) {
 	logLevelDefault := cmp.Or(logLevelEnv, "info")
 	logLevel := flag.String("log-level", logLevelDefault, "log level")
 
+	logFormat := cmp.Or(strings.TrimSpace(os.Getenv("LOG_FORMAT")), "auto")
+	flag.StringVar(&logFormat, "log-format", logFormat, "log format (text, text-color, auto, json)")
+
 	flag.Parse()
 
 	level, err := colorlog.ParseLevel(*logLevel)
 	if err != nil {
 		return 1, fmt.Errorf("parsing log level %q: %w", *logLevel, err)
 	}
+	slogLevel := slog.Level(int(level))
 
-	handler := colorlog.NewWithOptions(os.Stderr, colorlog.Options{Level: level})
-	lg := slog.New(handler)
-
-	slog.SetDefault(lg)
-	slog.SetLogLoggerLevel(slog.Level(int(level)))
+	lg := logHandler(logFormat, slogLevel)
+	slog.SetDefault(slog.New(lg))
+	slog.SetLogLoggerLevel(slogLevel)
 
 	slog.Info("using telegram token from file", "token_file", telegramTokenFile)
 	slog.Info("using auth secret from file", "auth_secret_file", authSecretFile)
@@ -133,4 +138,35 @@ func main() {
 	if code != 0 {
 		os.Exit(code)
 	}
+}
+
+func logHandler(cfgFormat string, level slog.Leveler) slog.Handler {
+	cfgFormat = strings.ToLower(strings.TrimSpace(cfgFormat))
+
+	switch {
+	case slices.Contains([]string{"", "auto"}, cfgFormat) && istty.IsTerminal(os.Stderr.Fd()), cfgFormat == "text-color":
+		return colorlog.NewWithOptions(os.Stdout, colorlog.Options{
+			Level:     colorLevels[level.Level()],
+			Formatter: colorlog.TextFormatter,
+		})
+
+	case cfgFormat == "", cfgFormat == "text":
+		return slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: level,
+		})
+	case cfgFormat == "json":
+		return slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+			Level: level,
+		})
+	default:
+		log.Printf("WARN: unsupported log format, fallback to text")
+		return logHandler("text", level)
+	}
+}
+
+var colorLevels = map[slog.Level]colorlog.Level{
+	slog.LevelDebug: colorlog.DebugLevel,
+	slog.LevelInfo:  colorlog.InfoLevel,
+	slog.LevelWarn:  colorlog.WarnLevel,
+	slog.LevelError: colorlog.ErrorLevel,
 }
