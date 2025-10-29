@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"cmp"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -20,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/ninedraft/tgbotstream/internal/withtmt"
+	"github.com/ninedraft/tgbotstream/secret"
 
 	telegram "github.com/OvyFlash/telegram-bot-api"
 	colorlog "github.com/charmbracelet/log"
@@ -59,16 +58,10 @@ func run() (int, error) {
 		return 1, fmt.Errorf("reading telegram token from %q: %w", telegramTokenFile, err)
 	}
 
-	authSecretData, err := os.ReadFile(authSecretFile)
+	authSecret, err := secret.FromFile(authSecretFile)
 	if err != nil {
 		return 1, fmt.Errorf("reading auth secret from %q: %w", authSecretFile, err)
 	}
-
-	if token == "" {
-		return 1, fmt.Errorf("auth secret data is empty to create token file")
-	}
-
-	_, authPass, _ := strings.Cut(string(bytes.TrimSpace(authSecretData)), ":")
 
 	ctx := context.Background()
 
@@ -81,14 +74,16 @@ func run() (int, error) {
 
 	mux := http.NewServeMux()
 
-	srv := newService(authPass, connCap)
+	srv := newService(authSecret, connCap)
 
 	mux.Handle("/ws", srv)
 
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	go func() {
+		onFailSleep := retrySleep
+
 		for {
 			updates, err := botApi.GetUpdatesWithContext(ctx, telegram.UpdateConfig{
 				Offset:  int(offset.Load()),
@@ -97,9 +92,13 @@ func run() (int, error) {
 			})
 
 			if err != nil {
-				cancel(fmt.Errorf("getting updates: %w", err))
-				return
+				onFailSleep = min(2*onFailSleep, 5*time.Minute)
+				slog.ErrorContext(ctx, "getting updates", "error", err, "retry_after", onFailSleep)
+				sleep(ctx, onFailSleep)
+
+				continue
 			}
+			onFailSleep = retrySleep
 
 			slog.InfoContext(ctx, "got updates", "n_updates", len(updates))
 
@@ -110,10 +109,14 @@ func run() (int, error) {
 			for _, update := range updates {
 				err := srv.Publish(ctx, update)
 				if err != nil {
-					slog.ErrorContext(ctx, "publishing update", "error", err)
+					onFailSleep = min(2*onFailSleep, 5*time.Minute)
+					slog.ErrorContext(ctx, "publishing update", "error", err, "retry_after", onFailSleep)
 
-					time.Sleep(retrySleep)
+					sleep(ctx, onFailSleep)
+
+					continue
 				}
+				onFailSleep = retrySleep
 			}
 		}
 	}()
@@ -128,11 +131,14 @@ func run() (int, error) {
 	}
 
 	defer context.AfterFunc(ctx, func() {
-		TimeoutValue(context.Background(), 5*time.Second, server.Shutdown)
+		err := TimeoutValue(context.Background(), 5*time.Second, server.Shutdown)
+		if err != nil {
+			panic("unable to shutdown server gracefully: " + err.Error())
+		}
 	})()
 
 	slog.Info("listening", "address", listenAddr)
-	if err = server.ListenAndServe(); err != nil {
+	if err = server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return 1, errors.Join(err, context.Cause(ctx))
 	}
 
@@ -151,19 +157,24 @@ func main() {
 }
 
 type service struct {
-	secret      []byte
+	secret      *secret.Secret
 	connCounter atomic.Int64
 	connTickets chan struct{}
 
 	mu   sync.RWMutex
-	subs map[*websocket.Conn]chan []byte
+	subs map[*websocket.Conn]*subscriber
 }
 
-func newService(secret string, connCap int) *service {
+type subscriber struct {
+	msgs      chan []byte
+	slownesss atomic.Int64
+}
+
+func newService(scrt *secret.Secret, connCap int) *service {
 	return &service{
-		secret:      []byte(secret),
+		secret:      scrt,
 		connTickets: make(chan struct{}, connCap),
-		subs:        map[*websocket.Conn]chan []byte{},
+		subs:        map[*websocket.Conn]*subscriber{},
 	}
 }
 
@@ -179,11 +190,17 @@ func (srv *service) Publish(ctx context.Context, msg any) error {
 	slog.DebugContext(ctx, "broadcasting messages", "n_subs", len(srv.subs))
 	defer slog.DebugContext(ctx, "done broadcasting messages", "n_subs", len(srv.subs))
 
-	send := func(msgs chan<- []byte) {
+	send := func(sub *subscriber) {
 		Timeout(ctx, 100*time.Millisecond, func(ctx context.Context) {
 			select {
-			case msgs <- data:
+			case sub.msgs <- data:
+				for i := sub.slownesss.Load(); i > 0; {
+					if sub.slownesss.CompareAndSwap(i, i-1) {
+						break
+					}
+				}
 			case <-ctx.Done():
+				sub.slownesss.Add(1)
 				return
 			}
 		})
@@ -191,9 +208,9 @@ func (srv *service) Publish(ctx context.Context, msg any) error {
 
 	wg := &sync.WaitGroup{}
 
-	for _, msgs := range srv.subs {
+	for _, sub := range srv.subs {
 		wg.Go(func() {
-			send(msgs)
+			send(sub)
 		})
 	}
 
@@ -206,8 +223,10 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := slog.With("remote_addr", r.RemoteAddr)
 
-	_, pass, _ := r.BasicAuth()
-	if subtle.ConstantTimeCompare([]byte(pass), srv.secret) != 1 {
+	username, pass, ok := r.BasicAuth()
+	if !ok ||
+		!secret.New([]byte(username), []byte(pass)).Equal(srv.secret) {
+
 		log.WarnContext(ctx, "unauthorized subscriber attempt", "remote_addr", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -247,9 +266,10 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.InfoContext(ctx, "new subscriber")
 
 	msgs := make(chan []byte, 1)
+	sub := &subscriber{msgs: msgs}
 
 	srv.mu.Lock()
-	srv.subs[conn] = msgs
+	srv.subs[conn] = sub
 	srv.mu.Unlock()
 
 	closeStatus := websocket.StatusNormalClosure
@@ -285,7 +305,7 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			fails = 0
+			fails = int(sub.slownesss.Load())
 		case msg := <-msgs:
 			if err = conn.Write(ctx, websocket.MessageText, msg); err != nil {
 				err = errors.Join(err, context.Cause(ctx))
@@ -298,4 +318,13 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	closeStatus = websocket.StatusGoingAway
+}
+
+func sleep(ctx context.Context, dt time.Duration) bool {
+	select {
+	case <-time.After(dt):
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

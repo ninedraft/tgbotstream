@@ -28,7 +28,7 @@ func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	secretFile := cmp.Or("./auth_secret", os.Getenv("AUTH_SECRET_FILE"))
+	secretFile := cmp.Or(os.Getenv("AUTH_SECRET_FILE"), "./auth_secret")
 
 	serverAddr := "ws://localhost:4201/ws"
 
