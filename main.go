@@ -32,7 +32,7 @@ func run() (int, error) {
 
 	authSecretFile := cmp.Or(os.Getenv("AUTH_SECRET_FILE"), "./auth_secret")
 
-	getUpdatesTimeout := time.Minute
+	getUpdatesTimeout := 5 * time.Minute
 	flag.DurationVar(&getUpdatesTimeout, "updates-timeout", getUpdatesTimeout, "Timeout for getting updates from Telegram API")
 
 	retrySleep := 5 * time.Second
