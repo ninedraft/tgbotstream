@@ -102,5 +102,6 @@ func stripHTTPErr(err error) error {
 		return err
 	}
 
+	// removing URL info - telegram token is passed as part of URL path, so we dropping it
 	return ue.Unwrap()
 }
