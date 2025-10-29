@@ -24,12 +24,6 @@ import (
 )
 
 func run() (int, error) {
-	colorlog.Default().SetLevel(colorlog.DebugLevel)
-	lg := slog.New(colorlog.Default())
-
-	slog.SetDefault(lg)
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-
 	telegramTokenFile := cmp.Or(os.Getenv("TELEGRAM_TOKEN_FILE"), "./token")
 
 	authSecretFile := cmp.Or(os.Getenv("AUTH_SECRET_FILE"), "./auth_secret")
@@ -45,7 +39,22 @@ func run() (int, error) {
 	connCap := 16
 	flag.IntVar(&connCap, "conncap", connCap, "maximum concurrent websocket connections")
 
+	logLevelEnv := os.Getenv("LOG_LEVEL")
+	logLevelDefault := cmp.Or(logLevelEnv, "info")
+	logLevel := flag.String("log-level", logLevelDefault, "log level")
+
 	flag.Parse()
+
+	level, err := colorlog.ParseLevel(*logLevel)
+	if err != nil {
+		return 1, fmt.Errorf("parsing log level %q: %w", *logLevel, err)
+	}
+
+	handler := colorlog.NewWithOptions(os.Stderr, colorlog.Options{Level: level})
+	lg := slog.New(handler)
+
+	slog.SetDefault(lg)
+	slog.SetLogLoggerLevel(slog.Level(int(level)))
 
 	slog.Info("using telegram token from file", "token_file", telegramTokenFile)
 	slog.Info("using auth secret from file", "auth_secret_file", authSecretFile)
