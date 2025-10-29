@@ -11,6 +11,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -85,13 +86,17 @@ func run() (int, error) {
 		onFailSleep := retrySleep
 
 		for {
-			updates, err := botApi.GetUpdatesWithContext(ctx, telegram.UpdateConfig{
-				Offset:  int(offset.Load()),
-				Limit:   100,
-				Timeout: max(1, int(getUpdatesTimeout/time.Second)),
-			})
+			updates, err := TimeoutValues(ctx, 2*getUpdatesTimeout,
+				func(ctx context.Context) ([]telegram.Update, error) {
+					return botApi.GetUpdatesWithContext(ctx, telegram.UpdateConfig{
+						Offset:  int(offset.Load()),
+						Limit:   100,
+						Timeout: max(1, int(getUpdatesTimeout/time.Second)),
+					})
+				})
 
 			if err != nil {
+				err = stripHTTPErr(err)
 				onFailSleep = min(2*onFailSleep, 5*time.Minute)
 				slog.ErrorContext(ctx, "getting updates", "error", err, "retry_after", onFailSleep)
 
@@ -329,4 +334,13 @@ func sleep(ctx context.Context, dt time.Duration) bool {
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func stripHTTPErr(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+
+	return ue.Unwrap()
 }
