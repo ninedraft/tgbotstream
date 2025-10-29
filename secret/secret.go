@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"syscall"
 )
 
@@ -44,13 +45,18 @@ var encoding = base64.StdEncoding
 func (secret *Secret) Encode() string {
 	n := len(secret.username) + len(separator) + len(secret.password)
 
-	buf := make([]byte, 0, encoding.EncodedLen(n))
+	str := &strings.Builder{}
+	str.Grow(n)
 
-	buf = encoding.AppendEncode(buf, secret.username)
-	buf = encoding.AppendEncode(buf, separator)
-	buf = encoding.AppendEncode(buf, secret.password)
+	wr := base64.NewEncoder(encoding, str)
 
-	return string(buf)
+	wr.Write(secret.username)
+	wr.Write(separator)
+	wr.Write(secret.password)
+
+	wr.Close()
+
+	return str.String()
 }
 
 var (

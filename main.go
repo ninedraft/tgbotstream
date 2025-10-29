@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -21,10 +22,15 @@ import (
 	. "github.com/ninedraft/tgbotstream/internal/withtmt"
 
 	telegram "github.com/OvyFlash/telegram-bot-api"
+	colorlog "github.com/charmbracelet/log"
 	"github.com/coder/websocket"
 )
 
 func run() (int, error) {
+	colorlog.Default().SetLevel(colorlog.DebugLevel)
+	lg := slog.New(colorlog.Default())
+
+	slog.SetDefault(lg)
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	telegramTokenFile := cmp.Or(os.Getenv("TELEGRAM_TOKEN_FILE"), "./token")
@@ -202,7 +208,7 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, pass, _ := r.BasicAuth()
 	if subtle.ConstantTimeCompare([]byte(pass), srv.secret) != 1 {
-		log.WarnContext(ctx, "unauthorized subscriber attempt", "remote_addr", r.RemoteAddr, "unsafe_header", r.Header)
+		log.WarnContext(ctx, "unauthorized subscriber attempt", "remote_addr", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -259,14 +265,9 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	ctx = conn.CloseRead(ctx)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
 
-	ping := func() error {
-		log.DebugContext(ctx, "sending ping")
-
-		return conn.Ping(ctx)
-	}
+	const pingInterval = 5 * time.Second
+	timer := time.NewTimer(pingInterval)
 
 	const maxFails = 3
 	for fails := 0; fails < maxFails; {
@@ -274,8 +275,10 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			log.DebugContext(ctx, "connection context canceled")
 			return
-		case <-ticker.C:
-			if err = ping(); err != nil {
+		case <-timer.C:
+			timer.Reset(pingInterval + rand.N(pingInterval/4))
+			log.DebugContext(ctx, "sending ping")
+			if err = TimeoutValue(ctx, 2*pingInterval, conn.Ping); err != nil {
 				err = errors.Join(err, context.Cause(ctx))
 				log.WarnContext(ctx, "pinging client", "error", err)
 				fails++

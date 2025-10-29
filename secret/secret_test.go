@@ -2,6 +2,7 @@ package secret_test
 
 import (
 	"encoding/base64"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -97,47 +98,20 @@ func TestSecretEncode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			usernameCopy := append([]byte(nil), username...)
-			passwordCopy := append([]byte(nil), password...)
+			username = slices.Clone(username)
+			password = slices.Clone(password)
 
-			secretOriginal := secret.New(usernameCopy, passwordCopy)
+			secretOriginal := secret.New(username, password)
 			encoded := secretOriginal.Encode()
 
-			expectedEncodedLen := base64.StdEncoding.EncodedLen(len(username)) +
-				base64.StdEncoding.EncodedLen(len(separator)) +
-				base64.StdEncoding.EncodedLen(len(password))
-			require.Len(t, encoded, expectedEncodedLen)
+			decoded, err := base64.StdEncoding.DecodeString(encoded)
 
-			offset := 0
-			nextChunk := func(length int) string {
-				start := offset
-				end := offset + length
-				require.LessOrEqual(t, end, len(encoded))
-				offset = end
-				return encoded[start:end]
-			}
+			require.NoError(t, err, "decoding secret: encoded=%q", encoded)
 
-			decodeChunk := func(length int) []byte {
-				decoded, err := base64.StdEncoding.DecodeString(nextChunk(length))
-				require.NoError(t, err)
-				return decoded
-			}
-
-			rawUsername := decodeChunk(base64.StdEncoding.EncodedLen(len(username)))
-			rawSeparator := decodeChunk(base64.StdEncoding.EncodedLen(len(separator)))
-			rawPassword := decodeChunk(base64.StdEncoding.EncodedLen(len(password)))
-			require.Equal(t, separator, string(rawSeparator))
-			require.Equal(t, len(encoded), offset)
-
-			raw := append([]byte{}, rawUsername...)
-			raw = append(raw, rawSeparator...)
-			raw = append(raw, rawPassword...)
-			require.Equal(t, string(username)+separator+string(password), string(raw))
-
-			var parsed secret.Secret
-			require.NoError(t, parsed.UnmarshalText(raw))
-			require.True(t, secretOriginal.Equal(&parsed))
-			require.True(t, (&parsed).Equal(secretOriginal))
+			parsed := &secret.Secret{}
+			require.NoError(t, parsed.UnmarshalText(decoded))
+			require.True(t, secretOriginal.Equal(parsed))
+			require.True(t, parsed.Equal(secretOriginal))
 		})
 	}
 

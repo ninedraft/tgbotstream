@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"sync"
@@ -20,7 +21,9 @@ import (
 )
 
 func main() {
-	lg := slog.New(colorlog.New(os.Stderr))
+	colorlog.Default().SetLevel(colorlog.DebugLevel)
+	lg := slog.New(colorlog.Default())
+
 	slog.SetDefault(lg)
 
 	slog.SetLogLoggerLevel(slog.LevelDebug)
@@ -61,8 +64,6 @@ func runClient(scrt *secret.Secret, addr string) {
 	header := http.Header{}
 	header.Set("Authorization", "Basic "+scrt.Encode())
 
-	log.Debug("header", "value", header)
-
 	conn, err := TimeoutValues(ctx, 10*time.Second, func(ctx context.Context) (*websocket.Conn, error) {
 		conn, _, err := websocket.Dial(ctx, addr, &websocket.DialOptions{
 			CompressionMode: websocket.CompressionContextTakeover,
@@ -81,15 +82,18 @@ func runClient(scrt *secret.Secret, addr string) {
 
 	go func() {
 		const timeout = 5 * time.Second
-		ticker := time.NewTicker(timeout)
-		defer ticker.Stop()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				if err := TimeoutValue(ctx, timeout, conn.Ping); err != nil {
+			case <-timer.C:
+				timer.Reset(timeout + rand.N(timeout/4))
+				log.DebugContext(ctx, "sending ping")
+
+				if err := TimeoutValue(ctx, 2*timeout, conn.Ping); err != nil {
 					err = errors.Join(err, context.Cause(ctx))
 					log.ErrorContext(ctx, "ping", "error", err)
 				}
