@@ -27,8 +27,8 @@ func New(username, password []byte) *Secret {
 }
 
 func (secret *Secret) Equal(other *Secret) bool {
-	if secret == other && secret == nil {
-		return true
+	if secret == nil || other == nil {
+		return secret == other
 	}
 
 	return subtle.ConstantTimeCompare(secret.password, other.password) == 1 &&
