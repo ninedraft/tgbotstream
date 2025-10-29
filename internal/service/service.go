@@ -134,7 +134,7 @@ func (srv *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	closeStatus := websocket.StatusNormalClosure
 
 	defer func() {
-		log.DebugContext(ctx, "closing connection", "status", closeStatus)
+		log.InfoContext(ctx, "closing connection", "status", closeStatus)
 		conn.Close(closeStatus, closeStatus.String())
 
 		srv.mu.Lock()
@@ -153,7 +153,7 @@ func (srv *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for fails := 0; fails < maxFails; {
 		select {
 		case <-ctx.Done():
-			log.DebugContext(ctx, "connection context canceled")
+			log.InfoContext(ctx, "connection context canceled")
 			return
 		case <-timer.C:
 			timer.Reset(pingInterval + rand.N(pingInterval/4))
