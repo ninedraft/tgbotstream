@@ -94,7 +94,10 @@ func run() (int, error) {
 			if err != nil {
 				onFailSleep = min(2*onFailSleep, 5*time.Minute)
 				slog.ErrorContext(ctx, "getting updates", "error", err, "retry_after", onFailSleep)
-				sleep(ctx, onFailSleep)
+
+				if !sleep(ctx, onFailSleep) {
+					return
+				}
 
 				continue
 			}
@@ -112,7 +115,9 @@ func run() (int, error) {
 					onFailSleep = min(2*onFailSleep, 5*time.Minute)
 					slog.ErrorContext(ctx, "publishing update", "error", err, "retry_after", onFailSleep)
 
-					sleep(ctx, onFailSleep)
+					if !sleep(ctx, onFailSleep) {
+						return
+					}
 
 					continue
 				}
@@ -194,11 +199,7 @@ func (srv *service) Publish(ctx context.Context, msg any) error {
 		Timeout(ctx, 100*time.Millisecond, func(ctx context.Context) {
 			select {
 			case sub.msgs <- data:
-				for i := sub.slownesss.Load(); i > 0; {
-					if sub.slownesss.CompareAndSwap(i, i-1) {
-						break
-					}
-				}
+				sub.slownesss.Store(0)
 			case <-ctx.Done():
 				sub.slownesss.Add(1)
 				return
@@ -288,6 +289,7 @@ func (srv *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	const pingInterval = 5 * time.Second
 	timer := time.NewTimer(pingInterval)
+	defer timer.Stop()
 
 	const maxFails = 3
 	for fails := 0; fails < maxFails; {
