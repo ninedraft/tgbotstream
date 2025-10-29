@@ -91,11 +91,11 @@ func runClient(scrt *secret.Secret, addr string) {
 				return
 			case <-timer.C:
 				timer.Reset(timeout + rand.N(timeout/4))
-				log.DebugContext(ctx, "sending ping")
 
 				if err := TimeoutValue(ctx, 2*timeout, conn.Ping); err != nil {
 					err = errors.Join(err, context.Cause(ctx))
 					log.ErrorContext(ctx, "ping", "error", err)
+					_ = conn.Close(websocket.StatusAbnormalClosure, "bye")
 				}
 			}
 		}
