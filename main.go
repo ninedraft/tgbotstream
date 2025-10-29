@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -75,7 +76,8 @@ func run() (int, error) {
 		return 1, fmt.Errorf("reading auth secret from %q: %w", authSecretFile, err)
 	}
 
-	ctx := context.Background()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Kill, os.Interrupt)
+	defer cancel()
 
 	botApi, err := telegram.NewBotAPI(token)
 	if err != nil {
@@ -89,9 +91,6 @@ func run() (int, error) {
 	srv := service.New(authSecret, connCap)
 
 	mux.Handle("/ws", srv)
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	go func() {
 		defer cancel()
