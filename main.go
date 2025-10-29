@@ -89,6 +89,8 @@ func run() (int, error) {
 	defer cancel()
 
 	go func() {
+		defer cancel()
+
 		updater.Run(ctx, updater.Config{
 			Bot:               botApi,
 			Publisher:         srv,
