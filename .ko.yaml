@@ -15,4 +15,5 @@ builds:
     binary: tgbotstream
     bare: true
     flags:
-      - -tags=timetzdata,certs -trimpath
+      - -trimpath
+      - -tags=timetzdata,certs
