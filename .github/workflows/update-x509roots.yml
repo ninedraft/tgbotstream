@@ -1,0 +1,79 @@
+name: Update x509roots fallback
+
+on:
+  schedule:
+    - cron: '0 1 1,15 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: update-x509roots
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Refresh fallback bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            **/go.sum
+
+      - name: Update fallback bundle
+        run: go get -u golang.org/x/crypto/x509roots/fallback@latest
+
+      - name: Tidy modules
+        run: go mod tidy
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run go vet
+        if: steps.diff.outputs.changed == 'true'
+        run: go vet ./...
+
+      - name: Run go test
+        if: steps.diff.outputs.changed == 'true'
+        run: go test ./...
+
+      - name: Create pull request
+        id: cpr
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7.0.8
+        with:
+          branch: chore/update-x509roots-fallback
+          delete-branch: true
+          title: 'chore(deps): refresh x509roots fallback bundle'
+          commit-message: 'chore(deps): refresh x509roots fallback bundle'
+          body: |
+            ## Summary
+            - Run `go get -u golang.org/x/crypto/x509roots/fallback@latest`
+            - Run `go mod tidy`
+
+            Automated update triggered by the scheduled workflow.
+          labels: dependencies, automated
+
+      - name: Enable auto-merge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash
