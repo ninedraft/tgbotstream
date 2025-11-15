@@ -8,7 +8,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/cristalhq/istty v0.1.0
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20251028130051-c0531f9c3451
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20251112184832-bcf6a849efcf
 )
 
 require (
