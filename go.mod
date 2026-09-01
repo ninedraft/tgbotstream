@@ -1,6 +1,6 @@
 module github.com/ninedraft/tgbotstream
 
-go 1.25.3
+go 1.26.0
 
 require (
 	github.com/OvyFlash/telegram-bot-api v0.0.0-20251014214618-257761277c51
@@ -8,7 +8,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/cristalhq/istty v0.1.0
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/crypto/x509roots/fallback v0.0.0-20260811175631-f44d03d253a1
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20260831030451-39dc44e69c28
 )
 
 require (
